@@ -4,6 +4,28 @@
 #pragma comment(lib, "ws2_32.lib") 
 
 using namespace std;
+// Funksion për të dërguar komandën dhe pritur përgjigjen nga serveri
+void sendCommand(SOCKET clientSocket, const string& message, bool isAdmin) {
+    char buffer[4096];
+
+        // Simulimi i prioritetit: admin merr përgjigje më shpejt
+    if (!isAdmin) Sleep(100); // 100 milisekonda
+
+    if (send(clientSocket, message.c_str(), message.length(), 0) == SOCKET_ERROR) {
+        cerr << "Gabim ne dergimin e komandes.\n";
+        return;
+    }
+
+    int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+    if (bytesReceived <= 0) {
+        cout << "Serveri u shkëput.\n";
+        return;
+    }
+
+    buffer[bytesReceived] = '\0';
+    cout << "Pergjigja nga serveri: " << buffer << endl;
+}
+
 
 int main() {
     WSADATA wsaData;
@@ -41,45 +63,43 @@ int main() {
     //test
 
     cout << "Jeni lidhur me serverin!\n";
-    string roli;
+   string roli;
     bool validRole = false;
-    bool canRead = false, canWrite = false, canExecute = false;
+    bool isAdmin = false;
 
     while (!validRole) {
         cout << "Zgjedh rolin tend (admin ose user): ";
         getline(cin, roli);
 
         if (roli == "admin") {
-            canRead = true;
-            canWrite = true;
-            canExecute = true;
+            isAdmin = true;
             cout << "✅ Jeni kycur si ADMIN - keni qasje te plote\n";
             validRole = true;
         } else if (roli == "user") {
-            canRead = true;
+            isAdmin = false;
             cout << "ℹ️  Jeni kycur si USER - vetem read lejohet\n";
             validRole = true;
         } else {
             cout << "⚠️ Roli nuk ekziston. Shkruani 'admin' ose 'user'.\n";
         }
     }
-
     string privInfo = "ROLE:" + roli;
     send(clientSocket, privInfo.c_str(), privInfo.length(), 0);
 
     map<string, bool> allowedCommands;
 
-if (roli == "admin") {
-    allowedCommands = {
-        {"/list", true}, {"/read", true}, {"/upload", true},
-        {"/download", true}, {"/delete", true}, {"/search", true},
-        {"/info", true}
-    };
-} else {
-    allowedCommands = {
-        {"/read", true}
-    };
-}
+    if (isAdmin) {
+        allowedCommands = {
+            {"/list", true}, {"/read", true}, {"/upload", true},
+            {"/download", true}, {"/delete", true}, {"/search", true},
+            {"/info", true}
+        };
+    } else {
+        allowedCommands = {
+            {"/read", true}
+        };
+    }
+
 
     while (true) {
 
@@ -111,20 +131,7 @@ if (roli == "admin") {
         }
 
      
-        if (send(clientSocket, message.c_str(), message.length(), 0) == SOCKET_ERROR) {
-            cerr << "Gabim ne dergimin e komandes.\n";
-            break;
-        }
-
-        
-        int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
-        if (bytesReceived <= 0) {
-            cout << "Serveri u shkëput.\n";
-            break;
-        }
-
-        buffer[bytesReceived] = '\0';
-        cout << "Pergjigja nga serveri: " << buffer << endl;
+       sendCommand(clientSocket, message, isAdmin);
     }
 
     closesocket(clientSocket);
