@@ -112,8 +112,6 @@ void handleClient(SOCKET clientSocket, string clientIP) {
         }
     }
         closesocket(clientSocket);
-}
-
 
     {
         lock_guard<mutex> lock(clientsMutex);
@@ -126,6 +124,7 @@ void handleClient(SOCKET clientSocket, string clientIP) {
     }
 
 
+
     {
         lock_guard<mutex> lock(statsMutex);
         for (auto it = clientStats.begin(); it != clientStats.end(); ++it) {
@@ -133,9 +132,10 @@ void handleClient(SOCKET clientSocket, string clientIP) {
                 clientStats.erase(it);
                 break;
             }
-        }
-    
+        } 
+    }
 }
+
 
 void monitorStats() {
     string command;
