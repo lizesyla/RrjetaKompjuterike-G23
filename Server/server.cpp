@@ -1,5 +1,6 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
+#include <set>
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <iostream>
@@ -16,10 +17,24 @@ using namespace std;
 const int PORT = 54000;
 const char* SERVER_IP = "0.0.0.0";
 const int MAX_CLIENTS = 4;
+const int TIMEOUT_MS = 30000;
+
+struct ClientStats {
+    string ip;
+    int messagesReceived = 0;
+    int bytesReceived = 0;
+    int bytesSent = 0;
+};
 
 vector<SOCKET> clients;
+vector<ClientStats> clientStats;
 mutex clientsMutex;
 mutex logMutex;
+mutex statsMutex;
+
+set<string> fullAccessClients = {
+    "192.168.1.100",
+};
 
 void logMessage(const string& msg) {
     lock_guard<mutex> lock(logMutex);
@@ -28,11 +43,31 @@ void logMessage(const string& msg) {
 }
 
 void handleClient(SOCKET clientSocket, string clientIP) {
+    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&TIMEOUT_MS, sizeof(TIMEOUT_MS));
+    bool fullAccess = (fullAccessClients.find(clientIP) != fullAccessClients.end());
+
+    {
+        lock_guard<mutex> lock(statsMutex);
+        clientStats.push_back({ clientIP, 0, 0, 0 });
+    }
+    
     char buffer[4096];
 
     while (true) {
         ZeroMemory(buffer, sizeof(buffer));
         int bytesReceived = recv(clientSocket, buffer, sizeof(buffer), 0);
+
+        if(bytesReceived == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            if (err == WSAETIMEDOUT) {
+                cout << "[TIMEOUT] " << clientIP << endl;
+                logMessage("[TIMEOUT] " + clientIP);
+            } else {
+                cout << "[ERROR] Receiving nga " << clientIP << " Error: " << err << endl;
+                logMessage("[ERROR] Receiving nga " + clientIP + " Error: " + to_string(err));
+            }
+            break;
+        }
 
         if (bytesReceived <= 0) {
             cout << "[DISCONNECT] " << clientIP << endl;
@@ -43,9 +78,42 @@ void handleClient(SOCKET clientSocket, string clientIP) {
         string msg(buffer, bytesReceived);
         cout << "[FROM " << clientIP << "] " << msg << endl;
         logMessage("[FROM " + clientIP + "] " + msg);
-    }
 
-    closesocket(clientSocket);
+        if (msg == "STATS") {
+            string statsMsg;
+            int bytesSent = 0;
+            {
+                lock_guard<mutex> lock(statsMutex);
+                for (auto& stats : clientStats) {  
+                    if (stats.ip == clientIP) {
+                        statsMsg = "Mesazhet e pranuara: " + to_string(stats.messagesReceived) +
+                                ", Bytes te pranuara: " + to_string(stats.bytesReceived) +
+                                ", Bytes te derguara: " + to_string(stats.bytesSent) + "\n";
+                        bytesSent = (int)statsMsg.size();
+                        stats.bytesSent += bytesSent;
+                        break;
+                    }
+                }
+            }
+            send(clientSocket, statsMsg.c_str(), bytesSent, 0);
+            continue;
+        }
+
+
+        {
+            lock_guard<mutex> lock(statsMutex);
+            for (auto& stats : clientStats) {
+                if (stats.ip == clientIP) {
+                    stats.messagesReceived++;
+                    stats.bytesReceived += bytesReceived;
+                    break;
+                }
+            }
+        }
+    }
+        closesocket(clientSocket);
+}
+
 
     {
         lock_guard<mutex> lock(clientsMutex);
@@ -53,6 +121,51 @@ void handleClient(SOCKET clientSocket, string clientIP) {
             if (*it == clientSocket) {
                 clients.erase(it);
                 break;
+            }
+        }
+    }
+
+
+    {
+        lock_guard<mutex> lock(statsMutex);
+        for (auto it = clientStats.begin(); it != clientStats.end(); ++it) {
+            if (it->ip == clientIP) {
+                clientStats.erase(it);
+                break;
+            }
+        }
+    
+}
+
+void monitorStats() {
+    string command;
+    while (true) {
+        getline(cin, command);
+        if (command == "STATS") {
+            
+            int activeClients;
+            {
+                lock_guard<mutex> lock(clientsMutex);
+                activeClients = clients.size();
+            }
+
+            lock_guard<mutex> lock(statsMutex);
+            ofstream statsFile("server_stats.txt");
+
+            cout << "Lidhjet aktive: " << activeClients << endl;
+            statsFile << "Lidhjet aktive: " << activeClients << endl;
+
+            cout << "IP klientëve aktivë dhe statistikat:\n";
+            statsFile << "IP klientëve aktivë dhe statistikat:\n";
+
+            for (const auto& cs : clientStats) {
+                cout << cs.ip << ": Mesazhe=" << cs.messagesReceived
+                    << ", BytesPranuar=" << cs.bytesReceived
+                    << ", BytesDeruar=" << cs.bytesSent << endl;
+
+                statsFile << cs.ip << ": Mesazhe=" << cs.messagesReceived
+                    << ", BytesPranuar=" << cs.bytesReceived
+                    << ", BytesDeruar=" << cs.bytesSent << endl;
             }
         }
     }
@@ -86,6 +199,9 @@ int main() {
     }
 
     cout << "Serveri po degjon ne portin " << PORT << " ..." << endl;
+
+    thread statsThread(monitorStats);
+    statsThread.detach();
 
     while (true) {
         sockaddr_in client;
