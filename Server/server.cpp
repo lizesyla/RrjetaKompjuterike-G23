@@ -39,7 +39,23 @@ set<string> fullAccessClients = {
 void logMessage(const string& msg) {
     lock_guard<mutex> lock(logMutex);
     ofstream file("server_log.txt", ios::app);
+    if(file.is_open()){
     file << msg << endl;
+    }
+}
+
+bool sendAll(SOCKET socket, const char* data, int totalBytes) {
+    int bytesSent = 0;
+    while (bytesSent < totalBytes) {
+        int result = send(socket, data + bytesSent, totalBytes - bytesSent, 0);
+        if (result == SOCKET_ERROR) {
+            int err = WSAGetLastError();
+            cerr << "[ERROR] send failed: " << err << endl;
+            return false;
+        }
+        bytesSent += result;
+    }
+    return true;
 }
 
 void handleClient(SOCKET clientSocket, string clientIP) {
@@ -81,7 +97,6 @@ void handleClient(SOCKET clientSocket, string clientIP) {
 
         if (msg == "STATS") {
             string statsMsg;
-            int bytesSent = 0;
             {
                 lock_guard<mutex> lock(statsMutex);
                 for (auto& stats : clientStats) {  
@@ -89,13 +104,15 @@ void handleClient(SOCKET clientSocket, string clientIP) {
                         statsMsg = "Mesazhet e pranuara: " + to_string(stats.messagesReceived) +
                                 ", Bytes te pranuara: " + to_string(stats.bytesReceived) +
                                 ", Bytes te derguara: " + to_string(stats.bytesSent) + "\n";
-                        bytesSent = (int)statsMsg.size();
-                        stats.bytesSent += bytesSent;
+                        stats.bytesSent += (int)statsMsg.size();
                         break;
                     }
                 }
             }
-            send(clientSocket, statsMsg.c_str(), bytesSent, 0);
+            if(!sendAll(clientSocket, statsMsg.c_str(), (int)statsMsg.size())) {
+                break;
+            }
+            // send(clientSocket, statsMsg.c_str(), (int)statsMsg.size(), 0);
             continue;
         }
 
@@ -152,20 +169,23 @@ void monitorStats() {
             lock_guard<mutex> lock(statsMutex);
             ofstream statsFile("server_stats.txt");
 
-            cout << "Lidhjet aktive: " << activeClients << endl;
-            statsFile << "Lidhjet aktive: " << activeClients << endl;
+            if (statsFile.is_open()) {
+                statsFile << "Lidhjet aktive: " << activeClients << endl;
+                statsFile << "IP klientëve aktivë dhe statistikat:\n";
+                for (const auto& cs : clientStats) {
+                    statsFile << cs.ip << ": Mesazhe=" << cs.messagesReceived
+                              << ", BytesPranuar=" << cs.bytesReceived
+                              << ", BytesDeruar=" << cs.bytesSent << endl;
+                }
+            }
 
+            cout << "Lidhjet aktive: " << activeClients << endl;
             cout << "IP klientëve aktivë dhe statistikat:\n";
-            statsFile << "IP klientëve aktivë dhe statistikat:\n";
 
             for (const auto& cs : clientStats) {
                 cout << cs.ip << ": Mesazhe=" << cs.messagesReceived
                     << ", BytesPranuar=" << cs.bytesReceived
-                    << ", BytesDeruar=" << cs.bytesSent << endl;
-
-                statsFile << cs.ip << ": Mesazhe=" << cs.messagesReceived
-                    << ", BytesPranuar=" << cs.bytesReceived
-                    << ", BytesDeruar=" << cs.bytesSent << endl;
+                    << ", BytesDerguar=" << cs.bytesSent << endl;
             }
         }
     }
