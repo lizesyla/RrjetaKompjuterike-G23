@@ -1,6 +1,7 @@
 #include <iostream>
-#include <winsock2.h>  // për funksionet e socket-it
-#pragma comment(lib, "ws2_32.lib") // lidh me bibliotekën e Winsock
+#include <winsock2.h>
+#include <map>
+#pragma comment(lib, "ws2_32.lib") 
 
 using namespace std;
 
@@ -27,7 +28,7 @@ int main() {
     }
 
     serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1"); // localhost
+    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
     serverAddr.sin_port = htons(1200); 
 
 
@@ -37,21 +38,93 @@ int main() {
         WSACleanup();
         return 1;
     }
+    //test
 
     cout << "Jeni lidhur me serverin!\n";
-    cout << "Shkruani kerkesen tuaj: ";
-    getline(cin, message);
+    string roli;
+    bool validRole = false;
+    bool canRead = false, canWrite = false, canExecute = false;
 
+    while (!validRole) {
+        cout << "Zgjedh rolin tend (admin ose user): ";
+        getline(cin, roli);
 
-    send(clientSocket, message.c_str(), message.length(), 0);
+        if (roli == "admin") {
+            canRead = true;
+            canWrite = true;
+            canExecute = true;
+            cout << "✅ Jeni kycur si ADMIN - keni qasje te plote\n";
+            validRole = true;
+        } else if (roli == "user") {
+            canRead = true;
+            cout << "ℹ️  Jeni kycur si USER - vetem read lejohet\n";
+            validRole = true;
+        } else {
+            cout << "⚠️ Roli nuk ekziston. Shkruani 'admin' ose 'user'.\n";
+        }
+    }
 
+    string privInfo = "ROLE:" + roli;
+    send(clientSocket, privInfo.c_str(), privInfo.length(), 0);
 
-    int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
-    if (bytesReceived > 0) {
+    map<string, bool> allowedCommands;
+
+if (roli == "admin") {
+    allowedCommands = {
+        {"/list", true}, {"/read", true}, {"/upload", true},
+        {"/download", true}, {"/delete", true}, {"/search", true},
+        {"/info", true}
+    };
+} else {
+    allowedCommands = {
+        {"/read", true}
+    };
+}
+
+    while (true) {
+
+        cout << "Shkruani kerkesen tuaj: ";
+        getline(cin, message);
+
+       
+        if (message.empty()) {
+            cout << "⚠️ Komanda nuk mund të jetë bosh. Provoni përsëri.\n";
+            continue;
+        }
+
+        if (message == "/exit") {
+            cout << "Duke u shkëputur nga serveri...\n";
+            break;
+        }
+
+        bool commandValid = false;
+        for (auto const& cmd : allowedCommands) {
+            if (message.find(cmd.first) == 0) {
+                commandValid = true;
+                break;
+            }
+        }
+
+        if (!commandValid) {
+            cout << "🚫 Kjo komandë nuk lejohet për rolin tuaj ose nuk ekziston.\n";
+            continue;
+        }
+
+     
+        if (send(clientSocket, message.c_str(), message.length(), 0) == SOCKET_ERROR) {
+            cerr << "Gabim ne dergimin e komandes.\n";
+            break;
+        }
+
+        
+        int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
+        if (bytesReceived <= 0) {
+            cout << "Serveri u shkëput.\n";
+            break;
+        }
+
         buffer[bytesReceived] = '\0';
         cout << "Pergjigja nga serveri: " << buffer << endl;
-    } else {
-        cout << "Nuk u mor asnje pergjigje nga serveri." << endl;
     }
 
     closesocket(clientSocket);
