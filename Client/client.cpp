@@ -51,7 +51,7 @@ int main() {
 
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
-    serverAddr.sin_port = htons(1200); 
+    serverAddr.sin_port = htons(54000); 
 
 
     if (connect(clientSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
