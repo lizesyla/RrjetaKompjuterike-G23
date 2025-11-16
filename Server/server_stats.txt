@@ -1,0 +1,4 @@
+Lidhjet aktive: 2
+IP klientëve aktivë dhe statistikat:
+127.0.0.1: Mesazhe=0, BytesPranuar=0, BytesDerguar=0, isAdmin=NO
+127.0.0.1: Mesazhe=0, BytesPranuar=0, BytesDerguar=0, isAdmin=NO
