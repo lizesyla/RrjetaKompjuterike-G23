@@ -208,3 +208,39 @@
 ] [CONNECT] 127.0.0.1
 [Sun Nov 16 01:18:49 2025
 ] [CONNECT SESSION] 127.0.0.1 admin=NO
+[Sun Nov 16 01:23:47 2025
+] [CONNECT] 127.0.0.1
+[Sun Nov 16 01:23:49 2025
+] [CONNECT SESSION] 127.0.0.1 admin=YES
+[Sun Nov 16 01:23:57 2025
+] [FROM 127.0.0.1] /read test.txt
+[Sun Nov 16 01:24:00 2025
+] [FROM 127.0.0.1] /list
+[Sun Nov 16 01:24:21 2025
+] [FROM 127.0.0.1] /search test
+[Sun Nov 16 01:24:32 2025
+] [FROM 127.0.0.1] /download test.txt
+[Sun Nov 16 01:25:02 2025
+] [TIMEOUT] 127.0.0.1
+[Sun Nov 16 01:27:49 2025
+] [CONNECT] 127.0.0.1
+[Sun Nov 16 01:27:51 2025
+] [CONNECT SESSION] 127.0.0.1 admin=YES
+[Sun Nov 16 01:27:56 2025
+] [FROM 127.0.0.1] /delete bosh.txt
+[Sun Nov 16 01:28:10 2025
+] [FROM 127.0.0.1] /info test.txt
+[Sun Nov 16 01:28:40 2025
+] [TIMEOUT] 127.0.0.1
+[Sun Nov 16 01:31:14 2025
+] [CONNECT] 127.0.0.1
+[Sun Nov 16 01:31:16 2025
+] [CONNECT SESSION] 127.0.0.1 admin=YES
+[Sun Nov 16 01:31:46 2025
+] [TIMEOUT] 127.0.0.1
+[Sun Nov 16 01:33:02 2025
+] [CONNECT] 127.0.0.1
+[Sun Nov 16 01:33:04 2025
+] [CONNECT SESSION] 127.0.0.1 admin=YES
+[Sun Nov 16 01:33:10 2025
+] [FROM 127.0.0.1] /upload uploads_server.txt 13

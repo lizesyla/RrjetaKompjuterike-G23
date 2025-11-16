@@ -319,6 +319,56 @@ void handleClient(SOCKET clientSocket, string clientIP) {
             updateStats(st, 0, (int)outS.size());
             continue;
         }
+  else if (cmd == "/upload") {
+    string filename; iss >> filename;
+    if (filename.empty()) {
+        string err = "ERROR: Duhet emri i file.\n";
+        sendAll(clientSocket, err.c_str(), (int)err.size());
+        updateStats(st, 0, (int)err.size());
+        continue;
+    }
+
+    // Presim madhësinë
+    int filesize = 0;
+    ZeroMemory(buffer, sizeof(buffer));
+    int br = recv(clientSocket, buffer, sizeof(buffer)-1, 0);
+    if (br <= 0) {
+        string err = "ERROR: Nuk mund te merrni madhësinë.\n";
+        sendAll(clientSocket, err.c_str(), (int)err.size());
+        continue;
+    }
+    buffer[br] = '\0';
+    string header(buffer);
+    if (header.rfind("FILESIZE ", 0) != 0) {
+        string err = "ERROR: Header i FILESIZE nuk u pranuar.\n";
+        sendAll(clientSocket, err.c_str(), (int)err.size());
+        continue;
+    }
+    filesize = stoi(header.substr(9));
+
+    // Hapim file-in ne server
+    fs::path p = fs::path(SERVER_FILES_DIR) / filename;
+    ofstream out(p, ios::binary);
+    if (!out.is_open()) {
+        string err = "ERROR: Nuk mund te hapni file ne server.\n";
+        sendAll(clientSocket, err.c_str(), (int)err.size());
+        continue;
+    }
+
+    int received = 0;
+    while (received < filesize) {
+        int r = recv(clientSocket, buffer, min((int)sizeof(buffer), filesize - received), 0);
+        if (r <= 0) break;
+        out.write(buffer, r);
+        received += r;
+    }
+    out.close();
+
+    string ok = "File u ngarkua me sukses: " + filename + "\n";
+    sendAll(clientSocket, ok.c_str(), (int)ok.size());
+}
+
+
         else {
             string err = "ERROR: Komande e panjohur.\n";
             sendAll(clientSocket, err.c_str(), (int)err.size());
