@@ -1,139 +1,169 @@
-README – Projekt Server–Client (Rrjetat Kompjuterike)
+Rrjetat Kompjuterike – Projekti Server/Client
+
+Implementimi i një sistemi server–klient me komunikim TCP, role, qasje në file dhe monitorim trafiku.
+
 Përshkrimi i projektit
 
-Ky projekt implementon një sistem komunikimi Server–Klient duke përdorur WinSock2 në gjuhën C++. Sistemi mbështet shumë klientë njëkohësisht (multithreading), menaxhim të privilegjeve, transferim të file-ve, dhe mekanizëm monitorimi të trafikut në kohë reale.
+Ky projekt implementon një arkitekturë Server–Client duke përdorur Winsock2 (C++), me funksionalitet të plotë sipas kërkesave të lëndës Rrjetat Kompjuterike.
 
-Serveri pranon kërkesa nga klientët dhe i përpunon ato sipas komandave të specifikuara. Njëri klient (admin) ka privilegje të plota, ndërsa klientët tjerë kanë vetëm akses leximi.
+Sistemi përfshin:
 
-Funksionaliteti i Serverit
-1. Parametrat kryesorë
+Server i aftë të menaxhojë më shumë klientë.
 
-Porti i serverit: 54000
+Klientë me role të ndryshme (admin dhe user).
 
-IP Adresa: 0.0.0.0
+Qasje në file në server.
 
-Numri maksimal i klientëve: 4
+Monitorim të trafikut dhe aktiviteteve të klientëve.
 
-Timeout për klientët joaktivë: 30 sekonda
+Përpunim komandash.
+
+1. Funksionaliteti i Serverit
+1. Variablat kryesore të konfigurimit
+
+PORT = 54000
+
+SERVER_IP = 0.0.0.0
 
 2. Menaxhimi i lidhjeve
 
-Serveri dëgjon në portin e caktuar.
+Serveri dëgjon më shumë klientë në të njëjtën kohë.
 
-Klientët pranohen deri në kufirin e paracaktuar.
+Limiti maksimal është përcaktuar me MAX_CLIENTS.
 
-Nëse numri i lidhjeve tejkalohet, lidhjet e reja refuzohen automatikisht.
+Nëse limiti tejkalohet, lidhjet e reja refuzohen me mesazh përkatës.
 
-3. Përpunimi i kërkesave nga klientët
+3. Përpunimi i kërkesave
 
-Serveri pranon dhe përpunon komandat e mëposhtme:
+Çdo klient mund të dërgojë kërkesa dhe serveri i trajton ato me thread të ndara.
 
-Komanda	Përshkrimi
-/list	Liston të gjitha file-t në direktoriumin server_files
-/read <emri>	Kthen përmbajtjen e file-it
-/download <emri>	Shkarkon file nga serveri
-/upload <emri>	Ngarkon file në server (vetëm admin)
-/delete <emri>	Fshin file nga serveri (vetëm admin)
-/search <keyword>	Kërkon file sipas fjalës kyçe
-/info <emri>	Shfaq madhësinë dhe datat e file-it
-STATS	Kthen statistikat e klientit
-4. Log dhe monitorim
+4. Monitorimi i komunikimit
 
-Serveri gjeneron dy file logimi:
+Serveri ruan për secilin klient:
 
-server_log.txt – regjistron çdo lidhje, shkëputje dhe kërkesë.
+IP adresën
 
-server_stats.txt – përditëson statistikat çdo 10 sekonda:
+Numrin e mesazheve të pranuara
 
-Numri i klientëve aktivë
+Bytes të dërguar / pranuar
 
-IP adresat e tyre
+Statusin admin/user
 
-Mesazhet e pranuara
+5. Timeout
 
-Bytes të dërguar dhe të pranuar
+Nëse klienti nuk dërgon asnjë mesazh për më shumë se:
 
-5. Privilegjet
-
-Admin-i ka leje të plotë: lexon, shkruan, fshin dhe ngarkon file.
-
-User-i ka vetëm leje leximi.
-
-Funksionaliteti i Klientit
-1. Lidhja me serverin
-
-Klienti lidhet me serverin përmes socket-it TCP, duke përdorur portin dhe IP adresën e caktuar.
-
-2. Zgjedhja e rolit
-
-Në startim, klienti zgjedh:
-
-admin
-user
-
-3. Ekzekutimi i komandave
-
-Klienti lejon ekzekutimin e komandave të mbështetura nga serveri, sipas rolit dhe privilegjeve.
-
-4. Leximi i përgjigjeve
-
-Klienti lexon përgjigjet e serverit në formë tekstuale dhe i paraqet ato në terminal.
-
-5. Diferencimi i privilegjeve
-
-Admin-i merr përgjigje më shpejt, ndërsa përdoruesit e zakonshëm kanë vonesë artificiale të lehtë, për të simuluar prioritet.
-
-Struktura e projektit
-RrjetaKompjuterike-G23/
-│── Client/
-│   └── client.cpp
-│
-│── Server/
-│   ├── server.cpp
-│   ├── server_files/
-│   │   ├── test.txt
-│   │   ├── ...
-│   ├── server_log.txt
-│   ├── server_stats.txt
-│
-│── README.md
-│── .vscode/
-
-Udhëzime për ekzekutim
-1. Ekzekutimi i serverit:
-
-Në terminal:
-
-cd Server
-server.exe
+TIMEOUT_MS = 30000 ms
 
 
-Serveri duhet të shfaqë:
+serveri e mbyll lidhjen.
 
-Serveri po degjon ne portin 54000 ...
+6. Qasje në file në server
 
-2. Ekzekutimi i klientit:
+Serveri lejon:
 
-Hap një dritare tjetër terminali:
+Lexim file
 
-cd Client
-client.exe
+Listim folderësh
 
-3. Zgjedhja e rolit:
-admin
+Upload
 
+Download
 
-ose
+Fshirje
 
-user
+Kërkim
 
-4. Ekzekutimi i komandave:
-/list
-/read test.txt
-/download test.txt
-/upload file.txt
-/delete file.txt
-/info test.txt
-/search test
+Informata për file
+
+7. Monitorim i trafikut
+
+Komanda:
+
 STATS
 
+
+shfaq në server:
+
+Numrin e lidhjeve aktive
+
+IP adresat e klientëve aktivë
+
+Statistikat e dërgim/pranimit të mesazheve
+
+Gjendjen admin/user të secilit klient
+
+Statistikat shkruhen edhe automatikisht në:
+
+server_stats.txt
+
+2. Funksionaliteti i Klientit
+1. Lidhja me serverin
+
+Klienti lidhet përmes TCP socket në portin 54000.
+
+2. Role të ndryshme
+
+admin: qasje e plotë (lexim, shkrim, fshirje, upload, download, search…)
+
+user: vetëm lexim
+
+3. Komandat që ekzekuton klienti admin
+Komanda	Përshkrimi
+/list	Liston file-t në server
+/read <file>	Lexon përmbajtjen e file-it në server
+/upload <file>	Dërgon file në server
+/download <file>	Shkarkon file nga serveri
+/delete <file>	Fshin file në server
+/search <keyword>	Kërkon file sipas fjalës kyçe
+/info <file>	Shfaq madhësinë dhe datat e krijimit/modifikimit
+4. Komandat për user
+
+User ka vetëm:
+
+/list
+
+/read
+
+/info
+
+3. Si të ekzekutohet projekti
+A. Kompajlimi i serverit (MSYS2 MINGW64)
+g++ server.cpp -o server.exe -lws2_32 -std=c++17
+
+
+Ekzekutimi:
+
+./server.exe
+
+B. Kompajlimi i klientit
+g++ client.cpp -o client.exe -lws2_32 -std=c++17
+
+
+Ekzekutimi:
+
+./client.exe
+
+4. Struktura e projektit
+RrjetaKompjuterike-G23/
+│── Server/
+│   ├── server.cpp
+│   ├── server.exe
+│   ├── server_log.txt
+│   ├── server_stats.txt
+│   └── server_files/
+│       └── ...
+│
+│── Client/
+│   ├── client.cpp
+│   └── client.exe
+│
+└── README.md
+
+5. Autore / Kontribut
+
+Projekti është zhvilluar si pjesë e detyrës së dytë për lëndën Rrjetat Kompjuterike.
+
+6. Licenca
+
+Ky projekt është krijuar vetëm për qëllime arsimore.
