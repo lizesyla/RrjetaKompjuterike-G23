@@ -1,3 +1,0 @@
-Lidhjet aktive: 1
-IP klientëve aktivë dhe statistikat:
-127.0.0.1: Mesazhe=1, BytesPranuar=43, BytesDerguar=10, isAdmin=YES

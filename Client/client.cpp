@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <algorithm>
 #pragma comment(lib, "ws2_32.lib") 
 
 using namespace std;
@@ -25,11 +26,9 @@ bool sendAll(SOCKET socket, const char* data, int totalBytes) {
 void printResponse(SOCKET clientSocket, const string& message) {
     char buffer[8192];
 
-    // Timeout 5 sekonda
-    struct timeval tv;
-    tv.tv_sec = 5;
-    tv.tv_usec = 0;
-    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+    // Timeout 5 sekonda (WinSock expects DWORD milliseconds)
+    DWORD timeout = 5000;
+    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 
     int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
     if (bytesReceived <= 0) {
@@ -45,12 +44,27 @@ void printResponse(SOCKET clientSocket, const string& message) {
         iss >> tag >> size;
         cout << "[INFO] Server do te dergoje file me size = " << size << " bytes.\n";
 
-        // Emri i file-it nxirret nga komanda
-        string filename = message.substr(message.find(' ') + 1);
+        // Emri i file-it nxirret nga komanda (support for "/download <name>" or "/read <name>")
+        string filename;
+        // Find the command word and filename from 'message' (which may include newline)
+        {
+            string tmp = message;
+            // trim
+            while (!tmp.empty() && (tmp.back() == '\n' || tmp.back() == '\r')) tmp.pop_back();
+            // find first space
+            auto pos = tmp.find(' ');
+            if (pos != string::npos) filename = tmp.substr(pos + 1);
+            else filename = "downloaded_file";
+            // remove potential leading/trailing spaces
+            filename.erase(0, filename.find_first_not_of(" \t"));
+            filename.erase(filename.find_last_not_of(" \t")+1);
+        }
+
         ofstream out(filename, ios::binary);
         int received = 0;
         while (received < size) {
-            int r = recv(clientSocket, buffer, min((int)sizeof(buffer), size - received), 0);
+            int toRead = min((int)sizeof(buffer), size - received);
+            int r = recv(clientSocket, buffer, toRead, 0);
             if (r <= 0) { cout << "Gabim ne marrjen e file.\n"; break; }
             out.write(buffer, r);
             received += r;
@@ -81,6 +95,7 @@ int main() {
     }
 
     serverAddr.sin_family = AF_INET;
+    // change 127.0.0.1 to your server IP if connecting from another machine
     serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1"); 
     serverAddr.sin_port = htons(54000); 
 
@@ -123,12 +138,17 @@ int main() {
         return 1;
     }
 
-    // Presim konfirmimin e serverit
+    // Presim konfirmimin e serverit (ROLE-OK ...)
     char buf[512];
+    // set small timeout for this initial ack
+    DWORD ackTimeout = 5000;
+    setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&ackTimeout, sizeof(ackTimeout));
     int br = recv(clientSocket, buf, sizeof(buf)-1, 0);
     if (br > 0) {
         buf[br] = '\0';
         cout << "Server: " << buf << endl;
+    } else {
+        cout << "Asnje konfirmim nga server (timeout). Vazhdoni me kujdes.\n";
     }
 
     map<string, bool> allowedCommands;
@@ -167,9 +187,6 @@ int main() {
             continue;
         }
 
-        // Shtojmë newline për të gjitha komandat
-        message += "\n";
-
         // --- UPLOAD ---
         if (cmd == "/upload") {
             string localPath, remoteName;
@@ -189,27 +206,21 @@ int main() {
             int size = (int)in.tellg();
             in.seekg(0, ios::beg);
 
-            string header = "/upload " + remoteName + "\n";
+            // Send command with size in same line: /upload <remoteName> <size>\n
+            string header = "/upload " + remoteName + " " + to_string(size) + "\n";
             if (!sendAll(clientSocket, header.c_str(), (int)header.size())) {
                 cout << "ERROR ne dergimin e header.\n";
                 in.close();
                 continue;
             }
 
-            string fsizeStr = "FILESIZE " + to_string(size) + "\n";
-            if (!sendAll(clientSocket, fsizeStr.c_str(), (int)fsizeStr.size())) {
-                cout << "ERROR ne dergimin e FILESIZE.\n";
-                in.close();
-                continue;
-            }
-
             const int BUF = 4096;
-            char buf[BUF];
+            char fbuf[BUF];
             while (!in.eof()) {
-                in.read(buf, BUF);
+                in.read(fbuf, BUF);
                 streamsize r = in.gcount();
                 if (r > 0) {
-                    if (!sendAll(clientSocket, buf, (int)r)) {
+                    if (!sendAll(clientSocket, fbuf, (int)r)) {
                         cout << "ERROR during upload.\n";
                         break;
                     }
@@ -217,10 +228,16 @@ int main() {
             }
             in.close();
 
+            // Wait for server response
+            // set recv timeout
+            DWORD t = 10000;
+            setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&t, sizeof(t));
             br = recv(clientSocket, buf, sizeof(buf)-1, 0);
             if (br > 0) {
                 buf[br] = '\0';
                 cout << "Server: " << buf << endl;
+            } else {
+                cout << "Nuk morre pergjigje nga server pas upload.\n";
             }
             continue;
         }
@@ -231,23 +248,31 @@ int main() {
                 cout << "Usage: " << cmd << " <filename>\n";
                 continue;
             }
-            if (!sendAll(clientSocket, message.c_str(), (int)message.size())) {
+            // append newline per protocol
+            string sendMsg = message + "\n";
+            if (!sendAll(clientSocket, sendMsg.c_str(), (int)sendMsg.size())) {
                 cout << "ERROR sending command\n";
                 continue;
             }
-            printResponse(clientSocket, message);
+            printResponse(clientSocket, sendMsg);
             continue;
         }
 
         // --- OTHER COMMANDS (text) ---
         else {
-            if (!sendAll(clientSocket, message.c_str(), (int)message.size())) {
+            string sendMsg = message + "\n";
+            if (!sendAll(clientSocket, sendMsg.c_str(), (int)sendMsg.size())) {
                 cout << "ERROR sending command\n";
                 continue;
             }
+
+            // Set reasonable timeout for text responses
+            DWORD t = 5000;
+            setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, (const char*)&t, sizeof(t));
+
             int bytesReceived = recv(clientSocket, buf, sizeof(buf)-1, 0);
             if (bytesReceived <= 0) {
-                cout << "Serveri u shkeput.\n";
+                cout << "Serveri u shkeput ose nuk ka pergjigje.\n";
                 continue;
             }
             buf[bytesReceived] = '\0';
