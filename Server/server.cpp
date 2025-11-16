@@ -13,6 +13,7 @@
 #include <sstream>
 #include <chrono>
 #include <sys/stat.h>
+#include <algorithm>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -40,7 +41,7 @@ mutex logMutex;
 mutex statsMutex;
 
 set<string> fullAccessClients = {
-    "192.168.1.100", // IP admin
+    "192.168.1.100", // IP admin (opsionale)
 };
 
 const string SERVER_FILES_DIR = "server_files";
@@ -74,8 +75,9 @@ bool sendAll(SOCKET socket, const char* data, int totalBytes) {
 bool sendFile(SOCKET sock, const fs::path& filepath, ClientStats &stats) {
     ifstream in(filepath, ios::binary);
     if (!in.is_open()) return false;
+
     in.seekg(0, ios::end);
-    auto size = (int)in.tellg();
+    int size = (int)in.tellg();
     in.seekg(0, ios::beg);
 
     string header = "FILESIZE " + to_string(size) + "\n";
@@ -125,7 +127,7 @@ string listFiles() {
 
 // --- FILE INFO ---
 string fileInfo(const string& filename) {
-    string fullPath = "server_files/" + filename;
+    string fullPath = SERVER_FILES_DIR + "/" + filename;
     struct stat fileStat;
     if (stat(fullPath.c_str(), &fileStat) != 0) {
         return "ERROR: File-i nuk ekziston ose nuk mund te lexohet.\n";
@@ -177,6 +179,7 @@ void handleClient(SOCKET clientSocket, string clientIP) {
     }
 
     auto getStatsRef = [&](ClientStats*& out)->bool {
+        lock_guard<mutex> lock(statsMutex);
         for (auto &s : clientStats) {
             if (s.socket == clientSocket) { out = &s; return true; }
         }
@@ -185,6 +188,7 @@ void handleClient(SOCKET clientSocket, string clientIP) {
 
     char buffer[8192];
 
+    // mesazhi i pare: ROLE:admin ose ROLE:user
     int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
     if (bytesReceived > 0) {
         buffer[bytesReceived] = '\0';
@@ -203,8 +207,12 @@ void handleClient(SOCKET clientSocket, string clientIP) {
         }
     }
 
-    cout << "[SESSION START] " << clientIP << " admin=" << (isAdmin? "YES":"NO") << endl;
-    logMessage("[CONNECT SESSION] " + clientIP + " admin=" + string(isAdmin? "YES":"NO"));
+    cout << "[SESSION START] " << clientIP << " admin=" << (isAdmin ? "YES" : "NO") << endl;
+    logMessage("[CONNECT SESSION] " + clientIP + " admin=" + string(isAdmin ? "YES" : "NO"));
+
+    auto hasWritePermission = [&](ClientStats* st)->bool {
+        return st && st->isAdmin;
+    };
 
     while (true) {
         ZeroMemory(buffer, sizeof(buffer));
@@ -220,11 +228,14 @@ void handleClient(SOCKET clientSocket, string clientIP) {
         msg.erase(0, msg.find_first_not_of(" \t"));
 
         ClientStats* st = nullptr;
-        if (getStatsRef(st)) {
+        getStatsRef(st);
+        {
             lock_guard<mutex> lock(statsMutex);
-            st->messagesReceived++;
-            st->bytesReceived += bytes;
-            isAdmin = st->isAdmin;
+            if (st) {
+                st->messagesReceived++;
+                st->bytesReceived += bytes;
+                isAdmin = st->isAdmin;
+            }
         }
 
         cout << "[FROM " << clientIP << "] " << msg << endl;
@@ -233,6 +244,7 @@ void handleClient(SOCKET clientSocket, string clientIP) {
         istringstream iss(msg);
         string cmd; iss >> cmd;
 
+        // --- STATS nga klienti ---
         if (cmd == "STATS") {
             if (st) {
                 string statsMsg = "Mesazhet e pranuara: " + to_string(st->messagesReceived) +
@@ -243,6 +255,7 @@ void handleClient(SOCKET clientSocket, string clientIP) {
             }
             continue;
         }
+        // --- /list ---
         else if (cmd == "/list") {
             string fl = listFiles();
             if (fl.empty()) fl = "(empty)\n";
@@ -250,6 +263,7 @@ void handleClient(SOCKET clientSocket, string clientIP) {
             updateStats(st, 0, (int)fl.size());
             continue;
         }
+        // --- /read & /download ---
         else if (cmd == "/read" || cmd == "/download") {
             string filename; iss >> filename;
             if (filename.empty()) {
@@ -284,11 +298,12 @@ void handleClient(SOCKET clientSocket, string clientIP) {
                         updateStats(st, 0, (int)r);
                     }
                 }
-            } else {
-                sendFile(clientSocket, p, *st);
+            } else { // /download
+                if (st) sendFile(clientSocket, p, *st);
             }
             continue;
         }
+        // --- /info ---
         else if (cmd == "/info") {
             string filename; iss >> filename;
             if (filename.empty()) {
@@ -302,6 +317,7 @@ void handleClient(SOCKET clientSocket, string clientIP) {
             updateStats(st, 0, (int)info.size());
             continue;
         }
+        // --- /search ---
         else if (cmd == "/search") {
             string keyword; iss >> keyword;
             if (keyword.empty()) {
@@ -319,56 +335,98 @@ void handleClient(SOCKET clientSocket, string clientIP) {
             updateStats(st, 0, (int)outS.size());
             continue;
         }
-  else if (cmd == "/upload") {
-    string filename; iss >> filename;
-    if (filename.empty()) {
-        string err = "ERROR: Duhet emri i file.\n";
-        sendAll(clientSocket, err.c_str(), (int)err.size());
-        updateStats(st, 0, (int)err.size());
-        continue;
-    }
+        // --- /upload (VETEM ADMIN) ---
+        else if (cmd == "/upload") {
+            if (!hasWritePermission(st)) {
+                string err = "ERROR: Nuk keni permission per /upload (vetem admin).\n";
+                sendAll(clientSocket, err.c_str(), (int)err.size());
+                updateStats(st, 0, (int)err.size());
+                continue;
+            }
 
-    // Presim madhësinë
-    int filesize = 0;
-    ZeroMemory(buffer, sizeof(buffer));
-    int br = recv(clientSocket, buffer, sizeof(buffer)-1, 0);
-    if (br <= 0) {
-        string err = "ERROR: Nuk mund te merrni madhësinë.\n";
-        sendAll(clientSocket, err.c_str(), (int)err.size());
-        continue;
-    }
-    buffer[br] = '\0';
-    string header(buffer);
-    if (header.rfind("FILESIZE ", 0) != 0) {
-        string err = "ERROR: Header i FILESIZE nuk u pranuar.\n";
-        sendAll(clientSocket, err.c_str(), (int)err.size());
-        continue;
-    }
-    filesize = stoi(header.substr(9));
+            string filename; iss >> filename;
+            if (filename.empty()) {
+                string err = "ERROR: Duhet emri i file.\n";
+                sendAll(clientSocket, err.c_str(), (int)err.size());
+                updateStats(st, 0, (int)err.size());
+                continue;
+            }
 
-    // Hapim file-in ne server
-    fs::path p = fs::path(SERVER_FILES_DIR) / filename;
-    ofstream out(p, ios::binary);
-    if (!out.is_open()) {
-        string err = "ERROR: Nuk mund te hapni file ne server.\n";
-        sendAll(clientSocket, err.c_str(), (int)err.size());
-        continue;
-    }
+            // presim header-in FILESIZE
+            ZeroMemory(buffer, sizeof(buffer));
+            int br = recv(clientSocket, buffer, sizeof(buffer)-1, 0);
+            if (br <= 0) {
+                string err = "ERROR: Nuk mund te merrni madhesine.\n";
+                sendAll(clientSocket, err.c_str(), (int)err.size());
+                updateStats(st, 0, (int)err.size());
+                continue;
+            }
+            buffer[br] = '\0';
+            string header(buffer);
+            if (header.rfind("FILESIZE ", 0) != 0) {
+                string err = "ERROR: Header i FILESIZE nuk u pranuar.\n";
+                sendAll(clientSocket, err.c_str(), (int)err.size());
+                updateStats(st, 0, (int)err.size());
+                continue;
+            }
+            int filesize = stoi(header.substr(9));
 
-    int received = 0;
-    while (received < filesize) {
-        int r = recv(clientSocket, buffer, min((int)sizeof(buffer), filesize - received), 0);
-        if (r <= 0) break;
-        out.write(buffer, r);
-        received += r;
-    }
-    out.close();
+            fs::path p = fs::path(SERVER_FILES_DIR) / filename;
+            ofstream out(p, ios::binary);
+            if (!out.is_open()) {
+                string err = "ERROR: Nuk mund te hapni file ne server.\n";
+                sendAll(clientSocket, err.c_str(), (int)err.size());
+                updateStats(st, 0, (int)err.size());
+                continue;
+            }
 
-    string ok = "File u ngarkua me sukses: " + filename + "\n";
-    sendAll(clientSocket, ok.c_str(), (int)ok.size());
-}
+            int received = 0;
+            while (received < filesize) {
+                int r = recv(clientSocket, buffer,
+                             min((int)sizeof(buffer), filesize - received), 0);
+                if (r <= 0) break;
+                out.write(buffer, r);
+                received += r;
+            }
+            out.close();
 
+            string ok = "File u ngarkua me sukses: " + filename + "\n";
+            sendAll(clientSocket, ok.c_str(), (int)ok.size());
+            updateStats(st, 0, (int)ok.size());
+            continue;
+        }
+        // --- /delete (VETEM ADMIN) ---
+        else if (cmd == "/delete") {
+            if (!hasWritePermission(st)) {
+                string err = "ERROR: Nuk keni permission per /delete (vetem admin).\n";
+                sendAll(clientSocket, err.c_str(), (int)err.size());
+                updateStats(st, 0, (int)err.size());
+                continue;
+            }
 
+            string filename; iss >> filename;
+            if (filename.empty()) {
+                string err = "ERROR: Duhet emri i file.\n";
+                sendAll(clientSocket, err.c_str(), (int)err.size());
+                updateStats(st, 0, (int)err.size());
+                continue;
+            }
+
+            fs::path p = fs::path(SERVER_FILES_DIR) / filename;
+            if (!fs::exists(p)) {
+                string err = "ERROR: File nuk ekziston.\n";
+                sendAll(clientSocket, err.c_str(), (int)err.size());
+                updateStats(st, 0, (int)err.size());
+                continue;
+            }
+
+            fs::remove(p);
+            string ok = "File u fshi me sukses: " + filename + "\n";
+            sendAll(clientSocket, ok.c_str(), (int)ok.size());
+            updateStats(st, 0, (int)ok.size());
+            continue;
+        }
+        // --- tjetrat ---
         else {
             string err = "ERROR: Komande e panjohur.\n";
             sendAll(clientSocket, err.c_str(), (int)err.size());
@@ -378,15 +436,21 @@ void handleClient(SOCKET clientSocket, string clientIP) {
     }
 
     closesocket(clientSocket);
+
     {
         lock_guard<mutex> lock(clientsMutex);
-        clients.erase(remove(clients.begin(), clients.end(), clientSocket), clients.end());
+        clients.erase(
+            std::remove(clients.begin(), clients.end(), clientSocket),
+            clients.end()
+        );
     }
     {
         lock_guard<mutex> lock(statsMutex);
-        clientStats.erase(remove_if(clientStats.begin(), clientStats.end(),
-                                    [&](const ClientStats& s){ return s.socket == clientSocket; }),
-                          clientStats.end());
+        clientStats.erase(
+            std::remove_if(clientStats.begin(), clientStats.end(),
+                           [&](const ClientStats& s){ return s.socket == clientSocket; }),
+            clientStats.end()
+        );
     }
 }
 
@@ -395,7 +459,7 @@ void writeStatsToFileAndConsole() {
     int activeClients;
     {
         lock_guard<mutex> lock(clientsMutex);
-        activeClients = clients.size();
+        activeClients = (int)clients.size();
     }
 
     lock_guard<mutex> lock(statsMutex);
